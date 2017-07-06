@@ -111,17 +111,19 @@ object OcrHelper{
     }
 
     fun initTessBaseData(context: Context) {
-        val datapath = "${Environment.getExternalStorageDirectory().absolutePath}/tesseract/"
+        val datapath = "${Environment.getExternalStorageDirectory().absolutePath}/tesseract/tessdata"
         println("datapath:$datapath")
         // String language = “num”;
-        val language = "eng"
         val dir = File(datapath)
         if (!dir.exists())
             dir.mkdirs()
 
-        copyFilesFassets(context, "./", datapath)
+        copyFilesFassets(context, "tess", datapath)
 
-        mTess.init(datapath, language)
+        mTess.init(
+                "${Environment.getExternalStorageDirectory().absolutePath}/tesseract/",
+                "eng"
+        )
         mTess.setVariable("tessedit_char_whitelist", "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
 
     }
