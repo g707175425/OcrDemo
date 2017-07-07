@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.support.v7.app.AppCompatActivity
 import kotlinx.android.synthetic.main.activity_main.*
+import org.jetbrains.anko.doAsync
 import java.io.*
 
 
@@ -25,67 +26,89 @@ class MainActivity : AppCompatActivity() {
         /**
          * TessBaseAPI初始化测第二个参数，就是识别库的名字不要后缀名。
          */
-        val DEFAULT_LANGUAGE = "eng"//"eng" "chi_sim"
-        /**
-         * assets中的文件名
-         */
-        val DEFAULT_LANGUAGE_NAME = DEFAULT_LANGUAGE + ".traineddata"
-        /**
-         * 保存到SD卡中的完整文件名
-         */
-        val LANGUAGE_PATH = tessdata + File.separator + DEFAULT_LANGUAGE_NAME
-        /**
-         * 权限请求值
-         */
-        val PERMISSION_REQUEST_CODE = 0
+        val DEFAULT_LANGUAGE = "eng"//"eng" "chi_sim" "equ"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
+
+        setContentView(R.layout.activity_main)
         surfaceView.setPreViewIV(preview)
         surfaceView.setMask(mask)
 
         // Example of a call to a native method
 //        TessBaseAPI().setImage()
 
-        if (Build.VERSION.SDK_INT >= 23) {
-            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED
-                    || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE),
-                        PERMISSION_REQUEST_CODE)
-            }else{
-                copyToSD(this, LANGUAGE_PATH, DEFAULT_LANGUAGE_NAME)
-            }
-        }else{
-            copyToSD(this, LANGUAGE_PATH, DEFAULT_LANGUAGE_NAME)
+        doAsync {
+            copyFilesFassets(this@MainActivity,"tess", tessdata)
+            surfaceView.startTakePic()
         }
 
     }
-
 
     /**
-     * 请求到权限后在这里复制识别库
-     * @param requestCode
+     * 从assets目录中复制整个文件夹内容
+     * @param  context  Context 使用CopyFiles类的Activity
      * *
-     * @param permissions
+     * @param  oldPath  String  原文件路径  如：/aa
      * *
-     * @param grantResults
+     * @param  newPath  String  复制后路径  如：xx:/bb/cc
      */
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        when (requestCode) {
-            PERMISSION_REQUEST_CODE ->
-                if (grantResults.isNotEmpty()
-                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    //Android6.0之前安装时就能复制，6.0之后要先请求权限，所以6.0以上的这个方法无用。
-                    copyToSD(this, LANGUAGE_PATH, DEFAULT_LANGUAGE_NAME)
+    fun copyFilesFassets(context: Context, oldPath: String, newPath: String) {
+        try {
+            val fileNames = context.assets.list(oldPath)//获取assets目录下的所有文件及目录名
+            if (fileNames.isNotEmpty()) {//如果是目录
+                val file = File(newPath)
+                file.mkdirs()//如果文件夹不存在，则递归
+                for (fileName in fileNames) {
+                    copyFilesFassets(context, oldPath + "/" + fileName, newPath + "/" + fileName)
                 }
-            else -> {
+            } else {//如果是文件
+                val inputStream = context.assets.open(oldPath)
+                val fos = FileOutputStream(File(newPath))
+                val buffer = ByteArray(1024)
+                var byteCount = 0
+                val read = fun():Int{
+                    byteCount = inputStream.read(buffer)
+                    return byteCount
+                }
+
+                while (read() != -1) {//循环从输入流读取 buffer字节
+                    fos.write(buffer, 0, byteCount)//将读取的输入流写入到输出流
+                }
+                fos.flush()//刷新缓冲区
+                inputStream.close()
+                fos.close()
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            //如果捕捉到错误则通知UI线程
         }
+
     }
+
+
+//    /**
+//     * 请求到权限后在这里复制识别库
+//     * @param requestCode
+//     * *
+//     * @param permissions
+//     * *
+//     * @param grantResults
+//     */
+//    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+//        when (requestCode) {
+//            PERMISSION_REQUEST_CODE ->
+//                if (grantResults.isNotEmpty()
+//                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+//                    //Android6.0之前安装时就能复制，6.0之后要先请求权限，所以6.0以上的这个方法无用。
+//                    copyToSD(this, LANGUAGE_PATH, DEFAULT_LANGUAGE_NAME)
+//                }
+//            else -> {
+//            }
+//        }
+//    }
 
     /**
      * A native method that is implemented by the 'native-lib' native library,

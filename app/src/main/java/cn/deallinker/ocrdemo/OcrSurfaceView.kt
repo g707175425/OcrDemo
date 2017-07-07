@@ -39,18 +39,6 @@ class OcrSurfaceView
     private var mask: MaskView? = null
 
     init {
-        OcrHelper.initTessBaseData(getContext())
-        setOnClickListener {
-            camera?.autoFocus{ b, camera ->
-                if(b){
-                    camera?.setOneShotPreviewCallback { data, camera ->
-                        OcrHelper.resolve(mask, this@OcrSurfaceView, getContext(),
-                                preview, data, camera)
-                    }
-                }
-            }
-        }
-
         holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceChanged(holder: SurfaceHolder?, format: Int, width: Int, height: Int) {
             }
@@ -63,6 +51,20 @@ class OcrSurfaceView
                 start()
             }
         })
+    }
+
+    fun startTakePic(){
+        OcrHelper.initTessBaseData(context)
+        setOnClickListener {
+            camera?.autoFocus{ b, camera ->
+                if(b){
+                    camera?.setOneShotPreviewCallback { data, camera ->
+                        OcrHelper.resolve(mask, this@OcrSurfaceView, getContext(),
+                                preview, data, camera)
+                    }
+                }
+            }
+        }
     }
 
     private fun start() {
@@ -137,6 +139,7 @@ object OcrHelper {
         mTess = TessBaseAPI().apply {
             init(DATAPATH, DEFAULT_LANGUAGE)
             setVariable("tessedit_char_whitelist", "0123456789")//abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
         }
     }
 
@@ -168,7 +171,7 @@ object OcrHelper {
                 matrix.postRotate(90f)
                 val cacheBm = bmp
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-                bmp = changeGrey(bmp)//convertToBlackWhite(bmp)
+//                bmp = changeGrey(bmp)//convertToBlackWhite(bmp)
 
                 cacheBm?.recycle()
                 //**********************
