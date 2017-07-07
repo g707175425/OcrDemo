@@ -37,6 +37,7 @@ class OcrSurfaceView
     private var camera: Camera? = null
     private var preview: ImageView? = null
     private var mask: MaskView? = null
+    private val centerRect = RectF()
 
     init {
         holder.addCallback(object : SurfaceHolder.Callback {
@@ -59,7 +60,7 @@ class OcrSurfaceView
             camera?.autoFocus{ b, camera ->
                 if(b){
                     camera?.setOneShotPreviewCallback { data, camera ->
-                        OcrHelper.resolve(mask, this@OcrSurfaceView, getContext(),
+                        OcrHelper.resolve(centerRect, mask, this@OcrSurfaceView, context,
                                 preview, data, camera)
                     }
                 }
@@ -128,6 +129,14 @@ class OcrSurfaceView
         this.mask = mask
     }
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        centerRect.left = width*0.2f
+        centerRect.right = width - width*0.2f
+        centerRect.top = height*0.4f
+        centerRect.bottom = height - height*0.4f
+        mask?.centerMask(centerRect)
+    }
 
 }
 
@@ -149,15 +158,16 @@ object OcrHelper {
         }
     }
 
-    fun resolve(mask: MaskView?, surfaceView: SurfaceView, context: Context, preview: ImageView?,
+    fun resolve(centerRect: RectF,mask: MaskView?, surfaceView: SurfaceView, context: Context, preview: ImageView?,
                 data: ByteArray, camera: Camera) {
         mTess?.apply {
             try {
                 val size = camera.parameters.previewSize
                 val image = YuvImage(data, ImageFormat.NV21, size.width, size.height, null)
                 val stream = ByteArrayOutputStream()
-                image.compressToJpeg(Rect(0, 0, size.width, size.height), 50, stream)
 
+                image.compressToJpeg(Rect( centerRect.top.toInt(),centerRect.left.toInt(),
+                        centerRect.bottom.toInt(), centerRect.right.toInt()), 50, stream)
 
                 var bmp = BitmapFactory
                         .decodeByteArray(stream.toByteArray(), 0, stream.size(),
@@ -188,15 +198,22 @@ object OcrHelper {
                 setDebug(BuildConfig.DEBUG)
                 println("结果:$utF8Text")
 
-//                Dialog(context).apply {
-//                    show()
-//                }
+                var confidenceIndex = -1 to -1
+
+                wordConfidences().forEachIndexed { index, i ->
+                    if(confidenceIndex.second < i && i > 70){//信任度大于80
+                        confidenceIndex = index to i
+                    }
+                }
+
+                if(confidenceIndex.first != -1){
+                    setImage(words.getPix(confidenceIndex.first))
+                }
 
                 AlertDialog.Builder(context).apply {
                     setTitle("结果")
                     setView(TextView(context).apply {
-
-                        text = utF8Text
+                        if(confidenceIndex.first != -1)text = utF8Text
                         gravity = Gravity.CENTER
                     })
                     setPositiveButton("确定"){
@@ -207,6 +224,8 @@ object OcrHelper {
                 }
 
                 mask?.invalidate(mTess!!)
+
+                println("信任度:${wordConfidences().map { "$it ," }}")
 //                end()
             } catch (ex: Exception) {
                 Log.e("Sys", "Error:" + ex.message)
@@ -285,17 +304,30 @@ class MaskView @JvmOverloads constructor(context: Context?, attrs: AttributeSet?
     private val boxPaint = Paint().apply {
         color = Color.RED
     }
+    private val maskPaint = Paint().apply {
+        color = (0xbb000000).toInt()
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.XOR)
+    }
+
     private val drawRect = RectF()
     private var imgHeight: Float = 0f
     private var imgWidth: Float = 0f
+    private var centerRect: RectF? = null
 
     override fun onDraw(canvas: Canvas?) {
         println("高:$height;宽$width")
+        if(centerRect != null){
+            canvas?.drawRect(0f, 0f, width.toFloat(), height.toFloat(), maskPaint)
+            canvas?.drawRect(centerRect, maskPaint)
+        }
+
         tessBaseAPI?.words?.boxRects?.forEach {
-            drawRect.left = (it.left.toFloat()/imgWidth)*width.toFloat()
-            drawRect.top = (it.top.toFloat()/imgHeight)*height.toFloat()
-            drawRect.right = (it.right.toFloat()/imgWidth)*width.toFloat()
-            drawRect.bottom = (it.bottom.toFloat()/imgHeight)*height.toFloat()
+            if(centerRect != null){
+                drawRect.left = centerRect!!.left+(it.left.toFloat()/imgWidth)*centerRect!!.width()
+                drawRect.top = centerRect!!.top+(it.top.toFloat()/imgHeight)*centerRect!!.height()
+                drawRect.right = centerRect!!.left+(it.right.toFloat()/imgWidth)*centerRect!!.width()
+                drawRect.bottom = centerRect!!.top+(it.bottom.toFloat()/imgHeight)*centerRect!!.height()
+            }
             println("盒子:$drawRect")
             canvas?.drawRect(drawRect, boxPaint)
         }
@@ -305,7 +337,11 @@ class MaskView @JvmOverloads constructor(context: Context?, attrs: AttributeSet?
         this.tessBaseAPI = tessBaseAPI
         this.imgHeight = tessBaseAPI.thresholdedImage?.height?.toFloat()?:0f
         this.imgWidth = tessBaseAPI.thresholdedImage?.width?.toFloat()?:0f
+        invalidate()
+    }
 
+    fun centerMask(centerRect:RectF){
+        this.centerRect = centerRect
         invalidate()
     }
 }
