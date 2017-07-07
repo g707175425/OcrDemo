@@ -1,19 +1,29 @@
 package cn.deallinker.ocrdemo
 
+import android.app.AlertDialog
 import android.content.Context
+import android.graphics.*
 import android.hardware.Camera
 import android.util.AttributeSet
-import android.view.SurfaceView
-import android.view.SurfaceHolder
-import com.googlecode.leptonica.android.Pix
-import com.googlecode.tesseract.android.TessBaseAPI
-import android.R.attr.data
-import android.graphics.*
-import android.os.Environment
 import android.util.Log
+import android.view.Gravity
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.View
+import android.widget.ImageView
+import android.widget.TextView
+import cn.deallinker.ocrdemo.MainActivity.Companion.DATAPATH
+import cn.deallinker.ocrdemo.MainActivity.Companion.DEFAULT_LANGUAGE
+import com.googlecode.tesseract.android.TessBaseAPI
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.ColorMatrix
+import android.graphics.Bitmap
+import android.media.ThumbnailUtils
+
+
+
+
 
 
 /**
@@ -24,24 +34,24 @@ class OcrSurfaceView
 @JvmOverloads constructor(context: Context?, attrs: AttributeSet? = null, defStyleAttr: Int = 0) :
         SurfaceView(context, attrs, defStyleAttr) {
 
-    private var camera:Camera? = null
+    private var camera: Camera? = null
+    private var preview: ImageView? = null
+    private var mask: MaskView? = null
 
     init {
         OcrHelper.initTessBaseData(getContext())
         setOnClickListener {
-//            camera?.autoFocus{ b, camera -> }
-//            camera?.takePicture(object:Camera.ShutterCallback{
-//                override fun onShutter() {
-//
-//                }
-//
-//            })
-            camera?.setOneShotPreviewCallback { data, camera ->
-                OcrHelper.resolve(data, camera)
+            camera?.autoFocus{ b, camera ->
+                if(b){
+                    camera?.setOneShotPreviewCallback { data, camera ->
+                        OcrHelper.resolve(mask, this@OcrSurfaceView, getContext(),
+                                preview, data, camera)
+                    }
+                }
             }
         }
 
-        holder.addCallback(object : SurfaceHolder.Callback{
+        holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceChanged(holder: SurfaceHolder?, format: Int, width: Int, height: Int) {
             }
 
@@ -64,7 +74,7 @@ class OcrSurfaceView
             //设置图片格式
             pictureFormat = ImageFormat.JPEG
             //设置图片的质量
-            jpegQuality = 90
+            jpegQuality = 80
             //设置照片的大小
             setPictureSize(width, height)
             //通过SurfaceView显示预览
@@ -97,59 +107,104 @@ class OcrSurfaceView
             camera?.release()
             camera = null
         }
+        OcrHelper.destroyTessBase()
     }
 
+
+    /**
+     * 设置预览图
+     */
+    fun setPreViewIV(preview: ImageView?) {
+        this.preview = preview
+    }
+
+
+    /**
+     * 设置遮罩
+     */
+    fun setMask(mask: MaskView?) {
+        this.mask = mask
+    }
 
 
 }
 
 
-object OcrHelper{
-    val mTess = TessBaseAPI()
-
-    init {
-    }
+object OcrHelper {
+    var mTess: TessBaseAPI? = null
 
     fun initTessBaseData(context: Context) {
-        val datapath = "${Environment.getExternalStorageDirectory().absolutePath}/tesseract/tessdata"
-        println("datapath:$datapath")
-        // String language = “num”;
-        val dir = File(datapath)
-        if (!dir.exists())
-            dir.mkdirs()
-
-        copyFilesFassets(context, "tess", datapath)
-
-        mTess.init(
-                "${Environment.getExternalStorageDirectory().absolutePath}/tesseract/",
-                "eng"
-        )
-        mTess.setVariable("tessedit_char_whitelist", "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
-
+        mTess = TessBaseAPI().apply {
+            init(DATAPATH, DEFAULT_LANGUAGE)
+            setVariable("tessedit_char_whitelist", "0123456789")//abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        }
     }
 
-    fun resolve(data: ByteArray,camera:Camera) {
-        mTess.apply {
-//            val decodeByteArray = BitmapFactory.decodeByteArray(data, 0, data.size)
-//            println("decodeByteArray:$decodeByteArray")
+    fun destroyTessBase(){
+        mTess?.apply {
+            end()
+        }
+    }
+
+    fun resolve(mask: MaskView?, surfaceView: SurfaceView, context: Context, preview: ImageView?,
+                data: ByteArray, camera: Camera) {
+        mTess?.apply {
             try {
                 val size = camera.parameters.previewSize
                 val image = YuvImage(data, ImageFormat.NV21, size.width, size.height, null)
                 val stream = ByteArrayOutputStream()
-                image.compressToJpeg(Rect(0, 0, size.width, size.height), 80, stream)
+                image.compressToJpeg(Rect(0, 0, size.width, size.height), 50, stream)
 
-                val bmp = BitmapFactory.decodeByteArray(stream.toByteArray(), 0, stream.size())
 
+                var bmp = BitmapFactory
+                        .decodeByteArray(stream.toByteArray(), 0, stream.size(),
+                                BitmapFactory.Options().apply {
+                                    inSampleSize = 4
+                                    inScaled = true
+                                })
+
+                //旋转图片
+                val matrix = Matrix()
+                matrix.postRotate(90f)
+                val cacheBm = bmp
+                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                bmp = changeGrey(bmp)//convertToBlackWhite(bmp)
+
+                cacheBm?.recycle()
                 //**********************
                 //因为图片会放生旋转，因此要对图片进行旋转到和手机在一个方向上
 //                rotateMyBitmap(bmp)
                 //**********************************
+                preview?.setImageBitmap(bmp)
+
+                println("图片大小:width:${bmp.width};height:${bmp.height}")
 
                 stream.close()
 
                 setImage(bmp)
                 setDebug(BuildConfig.DEBUG)
-                println("结果:${utF8Text}}")
+                println("结果:$utF8Text")
+
+//                Dialog(context).apply {
+//                    show()
+//                }
+
+                AlertDialog.Builder(context).apply {
+                    setTitle("结果")
+                    setView(TextView(context).apply {
+
+                        text = utF8Text
+                        gravity = Gravity.CENTER
+                    })
+                    setPositiveButton("确定"){
+                        dialogInterface, _ ->
+                        dialogInterface.dismiss()
+                    }
+                    show()
+                }
+
+                mask?.invalidate(mTess!!)
+//                end()
             } catch (ex: Exception) {
                 Log.e("Sys", "Error:" + ex.message)
             }
@@ -157,45 +212,97 @@ object OcrHelper{
         }
     }
 
-
     /**
-     * 从assets目录中复制整个文件夹内容
-     * @param  context  Context 使用CopyFiles类的Activity
-     * *
-     * @param  oldPath  String  原文件路径  如：/aa
-     * *
-     * @param  newPath  String  复制后路径  如：xx:/bb/cc
+     * 灰度转换
      */
-    fun copyFilesFassets(context: Context, oldPath: String, newPath: String) {
+    fun changeGrey(bitmap: Bitmap): Bitmap? {
+        val width = bitmap.width
+        val height = bitmap.height
+        var grayImg: Bitmap? = null
         try {
-            val fileNames = context.assets.list(oldPath)//获取assets目录下的所有文件及目录名
-            if (fileNames.isNotEmpty()) {//如果是目录
-                val file = File(newPath)
-                file.mkdirs()//如果文件夹不存在，则递归
-                for (fileName in fileNames) {
-                    copyFilesFassets(context, oldPath + "/" + fileName, newPath + "/" + fileName)
-                }
-            } else {//如果是文件
-                val inputStream = context.assets.open(oldPath)
-                val fos = FileOutputStream(File(newPath))
-                val buffer = ByteArray(1024)
-                var byteCount = 0
-                val read = fun():Int{
-                    byteCount = inputStream.read(buffer)
-                    return byteCount
-                }
-
-                while (read() != -1) {//循环从输入流读取 buffer字节
-                    fos.write(buffer, 0, byteCount)//将读取的输入流写入到输出流
-                }
-                fos.flush()//刷新缓冲区
-                inputStream.close()
-                fos.close()
-            }
+            grayImg = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(grayImg)
+            val paint = Paint()
+            val colorMatrix = ColorMatrix()
+            colorMatrix.setSaturation(0f)
+            val colorMatrixFilter = ColorMatrixColorFilter(
+                    colorMatrix)
+            paint.colorFilter = colorMatrixFilter
+            canvas.drawBitmap(bitmap, 0f, 0f, paint)
+            bitmap.recycle()
         } catch (e: Exception) {
             e.printStackTrace()
-            //如果捕捉到错误则通知UI线程
         }
+        return grayImg
+    }
 
+    /**
+     * 将彩色图转换为黑白图
+
+     * @param 位图
+     * *
+     * @return 返回转换好的位图
+     */
+    fun convertToBlackWhite(bmp: Bitmap): Bitmap {
+        val width = bmp.width // 获取位图的宽
+        val height = bmp.height // 获取位图的高
+        val pixels = IntArray(width * height) // 通过位图的大小创建像素点数组
+
+        bmp.getPixels(pixels, 0, width, 0, 0, width, height)
+        val alpha = 0xFF shl 24
+        for (i in 0..height - 1) {
+            for (j in 0..width - 1) {
+                var grey = pixels[width * i + j]
+
+                val red = grey and 0x00FF0000 shr 16
+                val green = grey and 0x0000FF00 shr 8
+                val blue = grey and 0x000000FF
+
+                grey = (red * 0.3 + green * 0.59 + blue * 0.11).toInt()
+                grey = alpha or (grey shl 16) or (grey shl 8) or grey
+                pixels[width * i + j] = grey
+            }
+        }
+        val newBmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+        newBmp.setPixels(pixels, 0, width, 0, 0, width, height)
+
+        val resizeBmp = ThumbnailUtils.extractThumbnail(newBmp, 380, 460)
+        return resizeBmp
+    }
+
+}
+
+/**
+ * 遮罩视图
+ */
+class MaskView @JvmOverloads constructor(context: Context?, attrs: AttributeSet? = null, defStyleAttr: Int = 0)
+    : View(context, attrs, defStyleAttr) {
+    private var tessBaseAPI: TessBaseAPI? = null
+    private val boxPaint = Paint().apply {
+        color = Color.RED
+    }
+    private val drawRect = RectF()
+    private var imgHeight: Float = 0f
+    private var imgWidth: Float = 0f
+
+    override fun onDraw(canvas: Canvas?) {
+        println("高:$height;宽$width")
+        tessBaseAPI?.words?.boxRects?.forEach {
+            drawRect.left = (it.left.toFloat()/imgWidth)*width.toFloat()
+            drawRect.top = (it.top.toFloat()/imgHeight)*height.toFloat()
+            drawRect.right = (it.right.toFloat()/imgWidth)*width.toFloat()
+            drawRect.bottom = (it.bottom.toFloat()/imgHeight)*height.toFloat()
+            println("盒子:$drawRect")
+            canvas?.drawRect(drawRect, boxPaint)
+        }
+    }
+
+    fun invalidate(tessBaseAPI: TessBaseAPI){
+        this.tessBaseAPI = tessBaseAPI
+        this.imgHeight = tessBaseAPI.thresholdedImage?.height?.toFloat()?:0f
+        this.imgWidth = tessBaseAPI.thresholdedImage?.width?.toFloat()?:0f
+
+        invalidate()
     }
 }
