@@ -62,7 +62,10 @@ class MainActivity : AppCompatActivity() {
                 val file = File(newPath)
                 file.mkdirs()//如果文件夹不存在，则递归
                 for (fileName in fileNames) {
-                    copyFilesFassets(context, oldPath + "/" + fileName, newPath + "/" + fileName)
+                    val newFileName = newPath + "/" + fileName
+                    if(!File(newFileName).exists()){
+                        copyFilesFassets(context, oldPath + "/" + fileName, newFileName)
+                    }
                 }
             } else {//如果是文件
                 val inputStream = context.assets.open(oldPath)

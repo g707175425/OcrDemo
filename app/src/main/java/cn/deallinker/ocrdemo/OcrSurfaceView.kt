@@ -201,7 +201,7 @@ object OcrHelper {
                 var confidenceIndex = -1 to -1
 
                 wordConfidences().forEachIndexed { index, i ->
-                    if(confidenceIndex.second < i && i > 70){//信任度大于80
+                    if(confidenceIndex.second < i && i > 50){//信任度大于80
                         confidenceIndex = index to i
                     }
                 }
