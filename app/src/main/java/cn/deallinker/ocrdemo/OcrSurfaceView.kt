@@ -20,6 +20,15 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.ColorMatrix
 import android.graphics.Bitmap
 import android.media.ThumbnailUtils
+import android.R.attr.bitmap
+import android.content.ContentValues.TAG
+
+
+
+
+
+
+
 
 
 
@@ -147,7 +156,8 @@ object OcrHelper {
     fun initTessBaseData(context: Context) {
         mTess = TessBaseAPI().apply {
             init(DATAPATH, DEFAULT_LANGUAGE)
-            setVariable("tessedit_char_whitelist", "0123456789")//abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+//            setVariable("tessedit_char_whitelist", "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+//            setVariable("classify_bln_numeric_mode", "1")
 
         }
     }
@@ -167,7 +177,7 @@ object OcrHelper {
                 val stream = ByteArrayOutputStream()
 
                 image.compressToJpeg(Rect( centerRect.top.toInt(),centerRect.left.toInt(),
-                        centerRect.bottom.toInt(), centerRect.right.toInt()), 50, stream)
+                        centerRect.bottom.toInt(), centerRect.right.toInt()), 100, stream)
 
                 var bmp = BitmapFactory
                         .decodeByteArray(stream.toByteArray(), 0, stream.size(),
@@ -182,6 +192,10 @@ object OcrHelper {
                 val cacheBm = bmp
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
 //                bmp = changeGrey(bmp)//convertToBlackWhite(bmp)
+//                bmp = changeGrey(bmp)
+//                bmp = lineGrey(bmp)
+                bmp = binarization(bmp)
+//                bmp = gray2Binary(bmp)
 
                 cacheBm?.recycle()
                 //**********************
@@ -232,6 +246,184 @@ object OcrHelper {
             }
 
         }
+    }
+
+    /**
+     *
+     */
+    fun binarization(img: Bitmap) : Bitmap {
+        val width = img.width
+        val height = img.height
+        val area = width * height
+        val gray = Array(width) { IntArray(height) }
+        var average = 0// 灰度平均值
+        var graysum = 0
+        var graymean = 0
+        var grayfrontmean = 0
+        var graybackmean = 0
+        var pixelGray: Int
+        var front = 0
+        var back = 0
+        val pix = IntArray(width * height)
+        img.getPixels(pix, 0, width, 0, 0, width, height)
+        for (i in 1..width - 1) { // 不算边界行和列，为避免越界
+            for (j in 1..height - 1) {
+                val x = j * width + i
+                val r = pix[x] shr 16 and 0xff
+                val g = pix[x] shr 8 and 0xff
+                val b = pix[x] and 0xff
+                pixelGray = (0.3 * r + 0.59 * g + 0.11 * b).toInt()// 计算每个坐标点的灰度
+                gray[i][j] = (pixelGray shl 16) + (pixelGray shl 8) + pixelGray
+                graysum += pixelGray
+            }
+        }
+        graymean = (graysum / area).toInt()// 整个图的灰度平均值
+        average = graymean
+        Log.i(TAG, "Average:" + average)
+        for (i in 0..width - 1)
+        // 计算整个图的二值化阈值
+        {
+            for (j in 0..height - 1) {
+                if (gray[i][j] and 0x0000ff < graymean) {
+                    graybackmean += gray[i][j] and 0x0000ff
+                    back++
+                } else {
+                    grayfrontmean += gray[i][j] and 0x0000ff
+                    front++
+                }
+            }
+        }
+        val frontvalue = (grayfrontmean / front).toInt()// 前景中心
+        val backvalue = (graybackmean / back).toInt()// 背景中心
+        val G = FloatArray(frontvalue - backvalue + 1)// 方差数组
+        for ((s, i1) in (backvalue..frontvalue + 1 - 1).withIndex())
+        // 以前景中心和背景中心为区间采用大津法算法（OTSU算法）
+        {
+            back = 0
+            front = 0
+            grayfrontmean = 0
+            graybackmean = 0
+            for (i in 0..width - 1) {
+                for (j in 0..height - 1) {
+                    if (gray[i][j] and 0x0000ff < i1 + 1) {
+                        graybackmean += gray[i][j] and 0x0000ff
+                        back++
+                    } else {
+                        grayfrontmean += gray[i][j] and 0x0000ff
+                        front++
+                    }
+                }
+            }
+            grayfrontmean = (grayfrontmean / front).toInt()
+            graybackmean = (graybackmean / back).toInt()
+            G[s] = back.toFloat() / area * (graybackmean - average).toFloat() * (graybackmean - average).toFloat() + front.toFloat() / area * (grayfrontmean - average).toFloat() * (grayfrontmean - average).toFloat()
+        }
+        var max = G[0]
+        var index = 0
+        for (i in 1..frontvalue - backvalue + 1 - 1) {
+            if (max < G[i]) {
+                max = G[i]
+                index = i
+            }
+        }
+
+        for (i in 0..width - 1) {
+            for (j in 0..height - 1) {
+                val `in` = j * width + i
+                if (gray[i][j] and 0x0000ff < index + backvalue) {
+                    pix[`in`] = Color.rgb(0, 0, 0)
+                } else {
+                    pix[`in`] = Color.rgb(255, 255, 255)
+                }
+            }
+        }
+
+        val temp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        temp.setPixels(pix, 0, width, 0, 0, width, height)
+        return temp
+    }
+
+    /**
+     * 二值化
+     */
+    // 该函数实现对图像进行二值化处理
+    fun gray2Binary(graymap: Bitmap): Bitmap {
+        //得到图形的宽度和长度
+        val width = graymap.width
+        val height = graymap.height
+        //创建二值化图像
+        var binarymap: Bitmap? = null
+        binarymap = graymap.copy(Bitmap.Config.ARGB_8888, true)
+        //依次循环，对图像的像素进行处理
+        for (i in 0..width - 1) {
+            for (j in 0..height - 1) {
+                //得到当前像素的值
+                val col = binarymap!!.getPixel(i, j)
+                //得到alpha通道的值
+                val alpha = col and 0xFF000000.toInt()
+                //得到图像的像素RGB的值
+                val red = col and 0x00FF0000 shr 16
+                val green = col and 0x0000FF00 shr 8
+                val blue = col and 0x000000FF
+                // 用公式X = 0.3×R+0.59×G+0.11×B计算出X代替原来的RGB
+                var gray = (red.toFloat() * 0.3 + green.toFloat() * 0.59 + blue.toFloat() * 0.11).toInt()
+                //对图像进行二值化处理
+                if (gray <= 95) {
+                    gray = 0
+                } else {
+                    gray = 255
+                }
+                // 新的ARGB
+                val newColor = alpha or (gray shl 16) or (gray shl 8) or gray
+                //设置新图像的当前像素值
+                binarymap.setPixel(i, j, newColor)
+            }
+        }
+        return binarymap
+    }
+
+    /**
+     * 线性灰度
+     */
+    fun lineGrey(image: Bitmap): Bitmap {
+        //得到图像的宽度和长度
+        val width = image.width
+        val height = image.height
+        //创建线性拉升灰度图像
+        var linegray: Bitmap? = null
+        linegray = image.copy(Bitmap.Config.ARGB_8888, true)
+        //依次循环对图像的像素进行处理
+        for (i in 0..width - 1) {
+            for (j in 0..height - 1) {
+                //得到每点的像素值
+                val col = image.getPixel(i, j)
+                val alpha = col and 0xFF000000.toInt()
+                var red = col and 0x00FF0000 shr 16
+                var green = col and 0x0000FF00 shr 8
+                var blue = col and 0x000000FF
+                // 增加了图像的亮度
+                red = (1.1 * red + 30).toInt()
+                green = (1.1 * green + 30).toInt()
+                blue = (1.1 * blue + 30).toInt()
+                //对图像像素越界进行处理
+                if (red >= 255) {
+                    red = 255
+                }
+
+                if (green >= 255) {
+                    green = 255
+                }
+
+                if (blue >= 255) {
+                    blue = 255
+                }
+                // 新的ARGB
+                val newColor = alpha or (red shl 16) or (green shl 8) or blue
+                //设置新图像的RGB值
+                linegray!!.setPixel(i, j, newColor)
+            }
+        }
+        return linegray
     }
 
     /**

@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity() {
         /**
          * TessBaseAPI初始化测第二个参数，就是识别库的名字不要后缀名。
          */
-        val DEFAULT_LANGUAGE = "eng"//"eng" "chi_sim" "equ"
+        val DEFAULT_LANGUAGE = "mcr+ocr"//"eng" "chi_sim" "equ"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
